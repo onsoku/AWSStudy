@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
 
 // テーマカラー設定
 const THEME_COLORS = {
@@ -555,8 +556,14 @@ const App = () => {
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
                   {chatMessages.map((msg, i) => (
-                    <div key={i} style={{ alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '80%', backgroundColor: msg.role === 'user' ? THEME_COLORS[activeCert] : '#333', padding: '12px 16px', borderRadius: '12px', borderBottomRightRadius: msg.role === 'user' ? '2px' : '12px', borderBottomLeftRadius: msg.role === 'user' ? '12px' : '2px', lineHeight: '1.5' }}>
-                      {msg.content}
+                    <div key={i} style={{ alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '80%', backgroundColor: msg.role === 'user' ? THEME_COLORS[activeCert] : '#333', padding: '12px 16px', borderRadius: '12px', borderBottomRightRadius: msg.role === 'user' ? '2px' : '12px', borderBottomLeftRadius: msg.role === 'user' ? '12px' : '2px', lineHeight: '1.5', overflowX: 'auto' }}>
+                      {msg.role === 'user' ? (
+                        <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                      ) : (
+                        <div className="markdown-body">
+                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        </div>
+                      )}
                     </div>
                   ))}
                   {chatLoading && (
@@ -747,6 +754,16 @@ const App = () => {
 
   return (
     <div style={baseLayoutStyle}>
+      <style>{`
+        .markdown-body p { margin-top: 0; margin-bottom: 0.8em; }
+        .markdown-body p:last-child { margin-bottom: 0; }
+        .markdown-body ul, .markdown-body ol { margin-top: 0; margin-bottom: 0.8em; padding-left: 20px; }
+        .markdown-body code { background-color: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: 4px; font-family: monospace; }
+        .markdown-body pre { background-color: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; overflow-x: auto; margin-bottom: 0.8em; }
+        .markdown-body pre code { background-color: transparent; padding: 0; }
+        .markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 { margin-top: 1.2em; margin-bottom: 0.5em; }
+        .markdown-body blockquote { border-left: 4px solid #555; margin: 0; padding-left: 10px; color: #ccc; }
+      `}</style>
       <div style={containerStyle}>
         
         {/* Header (Cert Tabs) */}
