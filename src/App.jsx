@@ -86,6 +86,8 @@ export const TOPICS = {
 export const callClaude = async (systemPrompt, messages, isChat = false) => {
   try {
     const apiKey = typeof window !== 'undefined' ? localStorage.getItem('aws-study-api-key') : null;
+    const modelName = (typeof window !== 'undefined' ? localStorage.getItem('aws-study-api-model') : null) || 'claude-3-haiku-20240307';
+    
     const headers = {
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
@@ -95,11 +97,15 @@ export const callClaude = async (systemPrompt, messages, isChat = false) => {
       headers['x-api-key'] = apiKey;
     }
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    // Localhost(Vite)環境ではCORSエラーを防ぐため設定したプロキシ経由で送信する
+    const isLocalhost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+    const endpoint = isLocalhost ? '/api/anthropic/v1/messages' : 'https://api.anthropic.com/v1/messages';
+
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        model: 'claude-3-5-sonnet-20241022',
+        model: modelName,
         max_tokens: 1000,
         system: systemPrompt,
         messages: messages,
@@ -107,17 +113,20 @@ export const callClaude = async (systemPrompt, messages, isChat = false) => {
     });
     
     if (!response.ok) {
-      throw new Error(`API Error: ${response.status}`);
+      const errText = await response.text();
+      console.error("Anthropic API Error:", response.status, errText);
+      throw new Error(`API Error ${response.status}: ${errText}`);
     }
     
     const data = await response.json();
     return data.content[0].text;
   } catch (error) {
-    console.warn("API call failed, using mock data.", error);
+    console.warn("API call failed, using mock data.", error.message);
+    const errMessage = error.message.replace(/"/g, "'").substring(0, 100);
     if (isChat) {
-      return `[Mock] ローカル環境のためAPI通信がエラーとなりました。Artifacts環境で検証を行うことで正しい応答が得られます。ご質問「${messages[messages.length - 1]?.content.substring(0, 15)}...」についての解説は本来ここに出力されます。`;
+      return `[Mock] API通信エラー (${errMessage})。正常に設定されると、ご質問「${messages[messages.length - 1]?.content.substring(0, 15)}...」についての回答が出力されます。`;
     }
-    return `{"type":"quiz","question":"[Mock] IAMロールに関する問題です。EC2インスタンスからS3バケットにアクセスする際、最も安全な方法はどれですか？","options":["アクセスキーをソースコードにハードコーディングする","環境変数にアクセスキーを設定する","IAMロールを作成しEC2インスタンスにアタッチする","IAMユーザーの認証情報をインスタンス内に保存する"],"correct":2,"explanation":"IAMロールを使用することで、一時的な認証情報が安全にインスタンスに提供され、キーのローテーションも自動化されます。","difficulty":3,"topic":"Security"}`;
+    return `{"type":"quiz","question":"[Mock: ${errMessage}] IAMロールに関する問題です。EC2インスタンスからS3バケットにアクセスする際、最も安全な方法はどれですか？","options":["アクセスキーをソースコードにハードコーディングする","環境変数にアクセスキーを設定する","IAMロールを作成しEC2インスタンスにアタッチする","IAMユーザーの認証情報をインスタンス内に保存する"],"correct":2,"explanation":"API呼び出しに失敗したためモックを表示しています。エラー原因: ${errMessage}","difficulty":3,"topic":"Security"}`;
   }
 };
 
@@ -126,6 +135,7 @@ const App = () => {
   const [activeCert, setActiveCert] = useState('SAA');
   const [view, setView] = useState('home'); // 'home' | 'quiz' | 'chat' | 'stats' | 'help'
   const [apiKeyInput, setApiKeyInput] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('aws-study-api-key') || '' : '');
+  const [apiModelInput, setApiModelInput] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('aws-study-api-model') || 'claude-3-haiku-20240307' : 'claude-3-haiku-20240307');
   const [records, setRecords] = useState({ answers: [], sessions: [] });
   const [level, setLevel] = useState(1);
   const [loadingStorage, setLoadingStorage] = useState(true);
@@ -662,19 +672,29 @@ const App = () => {
                 ローカル環境でAI機能（問題生成・チャット）をご利用になる場合、Anthropic APIキーが必要です。<br/>
                 Artifact環境でご利用の場合は、システムから自動的にキーが注入されるため設定不要です。未設定の場合はモック（ダミーデータ）で動作をテストできます。
               </p>
-              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
                 <input 
                   type="password" 
-                  placeholder="sk-ant-..." 
+                  placeholder="API Key (sk-ant-...)" 
                   value={apiKeyInput}
                   onChange={(e) => setApiKeyInput(e.target.value)}
+                  style={{ flex: 1, minWidth: '200px', padding: '10px', borderRadius: '4px', border: '1px solid #444', backgroundColor: '#111', color: '#fff', fontFamily: 'monospace' }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <input 
+                  type="text" 
+                  placeholder="Model (e.g. claude-3-haiku-20240307)" 
+                  value={apiModelInput}
+                  onChange={(e) => setApiModelInput(e.target.value)}
                   style={{ flex: 1, minWidth: '200px', padding: '10px', borderRadius: '4px', border: '1px solid #444', backgroundColor: '#111', color: '#fff', fontFamily: 'monospace' }}
                 />
                 <button 
                   onClick={() => {
                     if (apiKeyInput.trim()) {
                       localStorage.setItem('aws-study-api-key', apiKeyInput.trim());
-                      alert('APIキーをブラウザに保存しました。');
+                      localStorage.setItem('aws-study-api-model', apiModelInput.trim() || 'claude-3-haiku-20240307');
+                      alert('APIキーとモデル名をブラウザに保存しました。');
                     } else {
                       localStorage.removeItem('aws-study-api-key');
                       alert('APIキー設定を削除しました。モックデータ動作に戻ります。');
@@ -682,7 +702,7 @@ const App = () => {
                   }}
                   style={{ padding: '10px 20px', backgroundColor: THEME_COLORS[activeCert], color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
                 >
-                  保存 / 削除
+                  設定を保存 / キー削除
                 </button>
               </div>
             </div>
