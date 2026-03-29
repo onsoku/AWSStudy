@@ -149,6 +149,7 @@ const App = () => {
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  const [currentAnswerId, setCurrentAnswerId] = useState(null);
   const chatBottomRef = useRef(null);
 
   // --- Quiz Logic ---
@@ -157,6 +158,8 @@ const App = () => {
     setQuiz(null);
     setSelected(null);
     setAnswered(false);
+    setChatMessages([]);
+    setCurrentAnswerId(null);
     
     const topicsSeq = TOPICS[cert] || ['General'];
     const randomTopic = topicsSeq[Math.floor(Math.random() * topicsSeq.length)];
@@ -197,13 +200,19 @@ const App = () => {
 
     const isCorrect = idx === quiz.correct;
     const newAnswerRecord = {
+      id: Date.now().toString(),
       cert: activeCert,
       topic: quiz.topic,
       correct: isCorrect,
       difficulty: quiz.difficulty,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      quizData: quiz,
+      userAnswer: idx,
+      discussion: []
     };
     
+    setCurrentAnswerId(newAnswerRecord.id);
+
     const baseRecords = records || { answers: [], sessions: [] };
     const newRecords = { ...baseRecords, answers: [...(baseRecords.answers || []), newAnswerRecord] };
     
@@ -234,9 +243,89 @@ const App = () => {
     }
 
     const responseText = await callClaude(systemPrompt, apiMessages, true);
-    setChatMessages([...newMessages, { role: 'assistant', content: responseText }]);
+    const updatedMessages = [...newMessages, { role: 'assistant', content: responseText }];
+    setChatMessages(updatedMessages);
     setChatLoading(false);
+
+    if (currentAnswerId) {
+      setRecords(prev => {
+        const answers = prev.answers.map(ans => 
+          ans.id === currentAnswerId ? { ...ans, discussion: updatedMessages } : ans
+        );
+        const newRecords = { ...prev, answers };
+        setStorage(newRecords);
+        return newRecords;
+      });
+    }
   };
+
+  // --- Export Logic ---
+  const exportToMarkdown = () => {
+    let md = `# AWS Certification Study Reference Book\n\n`;
+    md += `*Generated on: ${new Date().toLocaleString()}*\n\n`;
+    
+    md += `## 📊 総合統計 (Global Stats)\n\n`;
+    const certs = Object.keys(THEME_COLORS);
+    certs.forEach(cert => {
+      const certAns = records.answers.filter(a => a.cert === cert);
+      const total = certAns.length;
+      const correct = certAns.filter(a => a.correct).length;
+      const acc = total > 0 ? Math.round((correct/total)*100) : 0;
+      md += `- **${cert}**: 正答率 ${acc}% (${correct}/${total}問)\n`;
+    });
+    md += `\n`;
+    
+    md += `## 📝 学習ログ & ディスカッション\n\n`;
+    
+    const validAnswers = records.answers.filter(a => a.quizData);
+    if (validAnswers.length === 0) {
+      md += `*学習ログ（問題と解説付き）がまだありません。これからの学習履歴がここに保存されます。*\n\n`;
+    } else {
+      validAnswers.forEach((ans, idx) => {
+        const q = ans.quizData;
+        const dateStr = new Date(ans.timestamp).toLocaleString();
+        
+        md += `### Q${idx + 1}. [${ans.cert}] ${ans.topic} (Lv.${ans.difficulty})\n`;
+        md += `*日時: ${dateStr}*\n\n`;
+        
+        md += `**問題:**\n${q.question}\n\n`;
+        md += `**選択肢:**\n`;
+        q.options.forEach((opt, oIdx) => {
+          const isCorrect = oIdx === q.correct;
+          const isUser = oIdx === ans.userAnswer;
+          let mark = '- [ ]';
+          if (isCorrect) mark = '- [✅]';
+          let line = `${mark} ${opt}`;
+          if (isUser && !isCorrect) line += ` 🔴 (Your Answer)`;
+          if (isUser && isCorrect) line += ` ⭐ (Your Answer)`;
+          md += `${line}\n`;
+        });
+        md += `\n**AI解説:**\n${q.explanation}\n\n`;
+        
+        if (ans.discussion && ans.discussion.length > 0) {
+          md += `**🗣️ ディスカッション履歴:**\n\n`;
+          ans.discussion.forEach(msg => {
+            const role = msg.role === 'user' ? '👤 ユーザー' : '🤖 AIコーチ';
+            if (msg.role === 'user' || msg.role === 'assistant') {
+              md += `**${role}**:\n${msg.content}\n\n`;
+            }
+          });
+        }
+        md += `---\n\n`;
+      });
+    }
+    
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'aws_study_reference.md');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
 
   // --- Effects ---
   useEffect(() => {
@@ -611,7 +700,17 @@ const App = () => {
 
         return (
           <div style={{ padding: '10px' }}>
-            <h2 style={{ color: '#fff', marginBottom: '20px', marginTop: 0 }}>総合統計 (Global Stats)</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '10px', marginTop: 0 }}>
+              <h2 style={{ color: '#fff', margin: 0 }}>総合統計 (Global Stats)</h2>
+              <button 
+                onClick={exportToMarkdown}
+                style={{ padding: '10px 15px', backgroundColor: THEME_COLORS[activeCert], color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', transition: 'opacity 0.2s' }}
+                onMouseOver={(e) => e.target.style.opacity = 0.8}
+                onMouseOut={(e) => e.target.style.opacity = 1}
+              >
+                📥 参考書を出力 (Markdown)
+              </button>
+            </div>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '40px' }}>
               {statsPerCert.map(stat => (
@@ -732,9 +831,10 @@ const App = () => {
                 クイズでわからなかった専門用語や、他の選択肢がなぜ間違っているかなど、クイズの文脈を引き継ぎながら専属のAIコーチと対話することができます。
               </p>
 
-              <h4 style={{ color: '#fff', marginBottom: '5px' }}>4. 学習の振り返り (HOME / STATS)</h4>
+              <h4 style={{ color: '#fff', marginBottom: '5px' }}>4. 学習の振り返りとエクスポート (HOME / STATS)</h4>
               <p style={{ fontSize: '14px', color: '#ccc', lineHeight: '1.5', marginTop: 0 }}>
-                HOMEでは選択中資格のトピック別正答率やレベルの進行度を、STATSでは全資格の総合的な習熟度グラフと、直近10件の日時入り解答履歴を確認できます。
+                HOMEでは選択中資格のトピック別正答率やレベルの進行度を、STATSでは全資格の総合的な習熟度グラフと、直近10件の日時入り解答履歴を確認できます。<br/>
+                また、STATS画面の「📥 参考書を出力 (Markdown)」ボタンから、これまでの問題・解説・ディスカッション履歴を1つのファイルとしてダウンロード可能です。
               </p>
             </div>
           </div>
